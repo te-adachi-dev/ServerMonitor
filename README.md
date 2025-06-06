@@ -190,14 +190,6 @@ ServerMonitor/
 └── README.md          # プロジェクト説明
 ```
 
-## 貢献
-
-1. このリポジトリをフォーク
-2. 機能ブランチを作成 (`git checkout -b feature/new-feature`)
-3. 変更をコミット (`git commit -am 'Add new feature'`)
-4. ブランチにプッシュ (`git push origin feature/new-feature`)
-5. プルリクエストを作成
-
 ## ライセンス
 
 MIT License
