@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="ja" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>サーバー監視ダッシュボード</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bs-body-bg: #0d1117;
+            --bs-body-color: #e6edf3;
+            --card-bg: #161b22;
+            --card-border: #30363d;
+            --primary-color: #238636;
+            --warning-color: #f85149;
+            --info-color: #58a6ff;
+        }
+
+        body {
+            background-color: var(--bs-body-bg);
+            color: var(--bs-body-color);
+            padding: 15px;
+            font-size: 14px;
+        }
+
+        .container-fluid {
+            max-width: none;
+            padding: 0 15px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            margin-bottom: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            background-color: #21262d;
+            border-bottom: 1px solid var(--card-border);
+            font-weight: bold;
+            padding: 10px 15px;
+        }
+
+        .card-body {
+            padding: 15px;
+        }
+
+        /* 横長レイアウト用のグリッド */
+        .wide-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .extra-wide-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+        }
+
+        /* CPU温度専用の横長デザイン */
+        .temperature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .temp-item {
+            background: linear-gradient(145deg, #1c2128, #161b22);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .temp-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .temp-label {
+            font-size: 0.9rem;
+            color: #7d8590;
+            margin-bottom: 8px;
+        }
+
+        .temp-bar {
+            height: 8px;
+            background: #21262d;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .temp-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        /* プログレスバーのダークテーマ調整 */
+        .progress {
+            background-color: #21262d;
+            height: 25px;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            font-weight: bold;
+            color: #000;
+        }
+
+        .bg-success {
+            background-color: var(--primary-color) !important;
+        }
+
+        .bg-warning {
+            background-color: #d29922 !important;
+        }
+
+        .bg-danger {
+            background-color: var(--warning-color) !important;
+        }
+
+        .bg-info {
+            background-color: var(--info-color) !important;
+        }
+
+        /* テーブルのダークテーマ */
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #1c2128;
+            border-color: var(--card-border);
+        }
+
+        .table-responsive {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+        }
+
+        /* ボタンとコントロール */
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background-color: #2ea043;
+            border-color: #2ea043;
+        }
+
+        /* チャートのダークテーマ調整 */
+        canvas {
+            background: linear-gradient(145deg, #1c2128, #161b22);
+            border-radius: 6px;
+        }
+
+        #last-update {
+            font-style: italic;
+            text-align: right;
+            font-size: 12px;
+            color: #7d8590;
+        }
+
+        /* システム情報のコンパクト表示 */
+        .system-info-compact {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            font-size: 13px;
+        }
+
+        .system-info-item {
+            background: #1c2128;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--card-border);
+        }
+
+        /* レスポンシブ対応 */
+        @media (min-width: 1920px) {
+            .ultra-wide-grid {
+                grid-template-columns: repeat(6, 1fr);
+            }
+            
+            .temperature-grid {
+                grid-template-columns: repeat(8, 1fr);
+            }
+        }
+
+        @media (min-width: 2560px) {
+            .ultra-wide-grid {
+                grid-template-columns: repeat(8, 1fr);
+            }
+            
+            .temperature-grid {
+                grid-template-columns: repeat(10, 1fr);
+            }
+        }
+
+        /* スクロールバーのダークテーマ */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #161b22;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 class="text-center mb-4">サーバー監視ダッシュボード</h1>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <button id="refresh-btn" class="btn btn-primary"><i class="fas fa-sync-alt"></i> 更新</button>
+            <div id="last-update">最終更新: -</div>
+        </div>
+
+        <!-- システム情報 - コンパクト表示 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-server"></i> システム情報
+            </div>
+            <div class="card-body">
+                <div class="system-info-compact" id="system-info">
+                    <!-- ここにシステム情報が動的に追加されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- CPU & メモリ - 横長レイアウト -->
+        <div class="wide-grid">
+            <!-- CPU情報 -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-microchip"></i> CPU使用率
+                </div>
+                <div class="card-body">
+                    <div id="cpu-model" class="mb-2"></div>
+                    <div class="progress mb-3">
+                        <div id="cpu-usage" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div id="cpu-info"></div>
+                        </div>
+                        <div class="col-md-6">
+                            <canvas id="cpu-chart" height="160"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- メモリ情報 -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-memory"></i> メモリ使用率
+                </div>
+                <div class="card-body">
+                    <div class="progress mb-3">
+                        <div id="memory-usage" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                    </div>
+                    <div id="memory-info"></div>
+                    <div class="mt-3">
+                        <h6>スワップ</h6>
+                        <div class="progress">
+                            <div id="swap-usage" class="progress-bar bg-info" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                        <div id="swap-info"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GPU情報 -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-tv"></i> GPU情報
+                </div>
+                <div class="card-body" id="gpu-info">
+                    <!-- ここにGPU情報が動的に追加されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 温度情報 - 横長専用デザイン -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-thermometer-half"></i> 温度情報
+            </div>
+            <div class="card-body">
+                <div id="temperature-info">
+                    <!-- ここに温度情報が動的に追加されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ディスク情報 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-hdd"></i> ディスク使用率
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped">
+                        <thead>
+                            <tr>
+                                <th>マウントポイント</th>
+                                <th>デバイス</th>
+                                <th>ファイルシステム</th>
+                                <th>合計</th>
+                                <th>使用中</th>
+                                <th>空き</th>
+                                <th>使用率</th>
+                            </tr>
+                        </thead>
+                        <tbody id="disk-info">
+                            <!-- ここにディスク情報が動的に追加されます -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ネットワーク情報 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-network-wired"></i> ネットワーク情報
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped">
+                        <thead>
+                            <tr>
+                                <th>インターフェース</th>
+                                <th>IPアドレス</th>
+                                <th>送信 (MB)</th>
+                                <th>受信 (MB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="network-info">
+                            <!-- ここにネットワーク情報が動的に追加されます -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // CPU履歴データ用の配列
+        const cpuHistory = Array(20).fill(0);
+        let cpuChart;
+
+        // Chart.jsのデフォルト設定をダークテーマに
+        Chart.defaults.color = '#e6edf3';
+        Chart.defaults.borderColor = '#30363d';
+
+        // ページロード時に初期化
+        $(document).ready(function() {
+            // CPUグラフの初期化
+            const cpuCtx = document.getElementById('cpu-chart').getContext('2d');
+            cpuChart = new Chart(cpuCtx, {
+                type: 'line',
+                data: {
+                    labels: Array(20).fill(''),
+                    datasets: [{
+                        label: 'CPU使用率 %',
+                        data: cpuHistory,
+                        borderColor: '#58a6ff',
+                        backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#e6edf3'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                color: '#30363d'
+                            },
+                            ticks: {
+                                color: '#7d8590'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: {
+                                color: '#30363d'
+                            },
+                            ticks: {
+                                color: '#7d8590'
+                            }
+                        }
+                    },
+                    animation: {
+                        duration: 0
+                    }
+                }
+            });
+
+            // 初回データ取得
+            fetchAllData();
+
+            // 更新ボタンのクリックイベント
+            $('#refresh-btn').click(function() {
+                fetchAllData();
+            });
+
+            // 定期的な更新（5秒ごと）
+            setInterval(fetchAllData, 5000);
+        });
+
+        // すべてのデータを取得して表示
+        function fetchAllData() {
+            $.ajax({
+                url: '/api/all',
+                type: 'GET',
+                dataType: 'json',
+                success: function(data) {
+                    // 最終更新時刻を更新
+                    $('#last-update').text('最終更新: ' + data.timestamp);
+
+                    // システム情報を更新
+                    updateSystemInfo(data.system);
+
+                    // CPU情報を更新
+                    updateCpuInfo(data.cpu);
+
+                    // メモリ情報を更新
+                    updateMemoryInfo(data.memory);
+
+                    // ディスク情報を更新
+                    updateDiskInfo(data.disk);
+
+                    // 温度情報を更新
+                    updateTemperatureInfo(data.temperature);
+
+                    // GPU情報を更新
+                    updateGpuInfo(data.gpu);
+
+                    // ネットワーク情報を更新
+                    updateNetworkInfo(data.network);
+                },
+                error: function(xhr, status, error) {
+                    console.error('データ取得エラー:', error);
+                }
+            });
+        }
+
+        // システム情報を更新
+        function updateSystemInfo(data) {
+            const systemInfoHtml = `
+                <div class="system-info-item"><strong>ホスト名:</strong><br>${data.hostname}</div>
+                <div class="system-info-item"><strong>OS:</strong><br>${data.os} ${data.os_release}</div>
+                <div class="system-info-item"><strong>アーキテクチャ:</strong><br>${data.architecture}</div>
+                <div class="system-info-item"><strong>起動時間:</strong><br>${data.boot_time}</div>
+                <div class="system-info-item"><strong>稼働時間:</strong><br>${data.uptime}</div>
+            `;
+            $('#system-info').html(systemInfoHtml);
+        }
+
+        // CPU情報を更新
+        function updateCpuInfo(data) {
+            // CPU使用率の更新
+            $('#cpu-usage').css('width', data.usage_percent + '%');
+            $('#cpu-usage').attr('aria-valuenow', data.usage_percent);
+            $('#cpu-usage').text(data.usage_percent + '%');
+
+            // プログレスバーの色を使用率に応じて変更
+            const cpuBar = $('#cpu-usage');
+            cpuBar.removeClass('bg-success bg-warning bg-danger');
+            if (data.usage_percent >= 80) {
+                cpuBar.addClass('bg-danger');
+            } else if (data.usage_percent >= 60) {
+                cpuBar.addClass('bg-warning');
+            } else {
+                cpuBar.addClass('bg-success');
+            }
+
+            // CPU使用率の履歴を更新
+            cpuHistory.push(data.usage_percent);
+            cpuHistory.shift();
+            cpuChart.data.datasets[0].data = cpuHistory;
+            cpuChart.update();
+
+            // CPUモデル情報
+            $('#cpu-model').html(`<strong>${data.model}</strong>`);
+
+            // CPU詳細情報
+            const cpuInfoHtml = `
+                <p><strong>物理コア数:</strong> ${data.cores}</p>
+                <p><strong>スレッド数:</strong> ${data.threads}</p>
+                <p><strong>現在の周波数:</strong> ${data.frequency} MHz</p>
+            `;
+            $('#cpu-info').html(cpuInfoHtml);
+        }
+
+        // メモリ情報を更新
+        function updateMemoryInfo(data) {
+            // メモリ使用率の更新
+            const memBar = $('#memory-usage');
+            memBar.css('width', data.percent + '%');
+            memBar.attr('aria-valuenow', data.percent);
+            memBar.text(data.percent + '%');
+
+            // プログレスバーの色を使用率に応じて変更
+            memBar.removeClass('bg-success bg-warning bg-danger');
+            if (data.percent >= 90) {
+                memBar.addClass('bg-danger');
+            } else if (data.percent >= 70) {
+                memBar.addClass('bg-warning');
+            } else {
+                memBar.addClass('bg-success');
+            }
+
+            // メモリ詳細情報
+            const memoryInfoHtml = `
+                <p><strong>合計:</strong> ${data.total} GB</p>
+                <p><strong>使用中:</strong> ${data.used} GB</p>
+                <p><strong>空き:</strong> ${data.free} GB</p>
+            `;
+            $('#memory-info').html(memoryInfoHtml);
+
+            // スワップ使用率の更新
+            $('#swap-usage').css('width', data.swap_percent + '%');
+            $('#swap-usage').attr('aria-valuenow', data.swap_percent);
+            $('#swap-usage').text(data.swap_percent + '%');
+
+            // スワップ詳細情報
+            const swapInfoHtml = `
+                <p><strong>合計:</strong> ${data.swap_total} GB</p>
+                <p><strong>使用中:</strong> ${data.swap_used} GB</p>
+                <p><strong>空き:</strong> ${data.swap_free} GB</p>
+            `;
+            $('#swap-info').html(swapInfoHtml);
+        }
+
+        // ディスク情報を更新
+        function updateDiskInfo(data) {
+            let diskInfoHtml = '';
+
+            data.forEach(function(disk) {
+                diskInfoHtml += `
+                    <tr>
+                        <td>${disk.mountpoint}</td>
+                        <td>${disk.device}</td>
+                        <td>${disk.fstype}</td>
+                        <td>${disk.total} GB</td>
+                        <td>${disk.used} GB</td>
+                        <td>${disk.free} GB</td>
+                        <td>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar ${getDiskProgressBarClass(disk.percent)}" role="progressbar" style="width: ${disk.percent}%;" aria-valuenow="${disk.percent}" aria-valuemin="0" aria-valuemax="100">${disk.percent}%</div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            $('#disk-info').html(diskInfoHtml);
+        }
+
+        // ディスク使用率に応じてプログレスバーの色を変更
+        function getDiskProgressBarClass(percent) {
+            if (percent >= 90) {
+                return 'bg-danger';
+            } else if (percent >= 70) {
+                return 'bg-warning';
+            } else {
+                return 'bg-success';
+            }
+        }
+
+        // 温度情報を更新 - 横長レイアウト用
+        function updateTemperatureInfo(data) {
+            let tempInfoHtml = '';
+
+            if (data.error) {
+                tempInfoHtml = `<p class="text-warning">注意: ${data.error}</p>`;
+            } else {
+                tempInfoHtml += '<div class="temperature-grid">';
+                
+                if (data.cpu) {
+                    for (const [key, value] of Object.entries(data.cpu)) {
+                        tempInfoHtml += `
+                            <div class="temp-item">
+                                <div class="temp-label">CPU ${key}</div>
+                                <div class="temp-value ${getTemperatureClass(value)}">${value}°C</div>
+                                <div class="temp-bar">
+                                    <div class="temp-fill ${getTemperatureBarClass(value)}" style="width: ${Math.min(value * 100 / 100, 100)}%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+
+                if (data.nvme) {
+                    for (const [key, value] of Object.entries(data.nvme)) {
+                        tempInfoHtml += `
+                            <div class="temp-item">
+                                <div class="temp-label">NVMe ${key}</div>
+                                <div class="temp-value ${getTemperatureClass(value)}">${value}°C</div>
+                                <div class="temp-bar">
+                                    <div class="temp-fill ${getTemperatureBarClass(value)}" style="width: ${Math.min(value * 100 / 100, 100)}%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                tempInfoHtml += '</div>';
+            }
+
+            $('#temperature-info').html(tempInfoHtml || '<p>温度情報は利用できません</p>');
+        }
+
+        // 温度に応じてテキスト色を変更
+        function getTemperatureClass(value) {
+            if (value >= 80) {
+                return 'text-danger fw-bold';
+            } else if (value >= 70) {
+                return 'text-warning fw-bold';
+            } else if (value >= 60) {
+                return 'text-info';
+            } else {
+                return 'text-success';
+            }
+        }
+
+        // 温度に応じてプログレスバーの色を変更
+        function getTemperatureBarClass(value) {
+            if (value >= 80) {
+                return 'bg-danger';
+            } else if (value >= 70) {
+                return 'bg-warning';
+            } else if (value >= 60) {
+                return 'bg-info';
+            } else {
+                return 'bg-success';
+            }
+        }
+
+        // GPU情報を更新
+        function updateGpuInfo(data) {
+            let gpuInfoHtml = '';
+
+            if (data.error) {
+                gpuInfoHtml = `<p class="text-danger">エラー: ${data.error}</p>`;
+            } else {
+                gpuInfoHtml = `
+                    <p><strong>デバイス:</strong> ${data.device}</p>
+                    <p><strong>ドライバ:</strong> ${data.driver}</p>
+                `;
+            }
+
+            $('#gpu-info').html(gpuInfoHtml);
+        }
+
+        // ネットワーク情報を更新
+        function updateNetworkInfo(data) {
+            let networkInfoHtml = '';
+
+            if (data.error) {
+                networkInfoHtml = `<tr><td colspan="4" class="text-danger">エラー: ${data.error}</td></tr>`;
+            } else {
+                for (const [nic, info] of Object.entries(data)) {
+                    // IPv4アドレスを取得
+                    let ipAddress = 'なし';
+                    if (info.addresses && info.addresses.length > 0) {
+                        for (const addr of info.addresses) {
+                            if (addr.type === 'AF_INET') {
+                                ipAddress = addr.address;
+                                break;
+                            }
+                        }
+                    }
+
+                    networkInfoHtml += `
+                        <tr>
+                            <td>${nic}</td>
+                            <td>${ipAddress}</td>
+                            <td>${info.sent}</td>
+                            <td>${info.received}</td>
+                        </tr>
+                    `;
+                }
+            }
+
+            $('#network-info').html(networkInfoHtml);
+        }
+    </script>
+</body>
+</html>
