@@ -18,6 +18,9 @@
             --primary-color: #238636;
             --warning-color: #f85149;
             --info-color: #58a6ff;
+            --gpu-color: #8b5cf6;
+            --gpu-gradient-start: #6366f1;
+            --gpu-gradient-end: #a855f7;
         }
 
         body {
@@ -77,6 +80,44 @@
             border-radius: 8px;
             padding: 15px;
             text-align: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .temp-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        /* GPU専用のスタイル */
+        .temp-item.gpu-temp {
+            background: linear-gradient(145deg, #2e1f5e, #1e1433);
+            border: 1px solid #4c3a8f;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .temp-item.gpu-temp::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(90deg, var(--gpu-gradient-start), var(--gpu-gradient-end));
+            border-radius: 8px;
+            opacity: 0.3;
+            z-index: -1;
+            animation: gpuGlow 3s ease-in-out infinite;
+        }
+
+        @keyframes gpuGlow {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.4; }
+        }
+
+        .temp-item.gpu-temp .temp-label {
+            color: #c4b5fd;
+            font-weight: bold;
         }
 
         .temp-value {
@@ -105,6 +146,43 @@
             transition: width 0.3s ease;
         }
 
+        /* GPU温度バー専用 */
+        .gpu-temp .temp-bar {
+            background: #1a0f2e;
+        }
+
+        .gpu-temp .temp-fill {
+            background: linear-gradient(90deg, var(--gpu-gradient-start), var(--gpu-gradient-end));
+        }
+
+        /* GPU情報カード拡張 */
+        .gpu-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .gpu-stat-item {
+            background: linear-gradient(145deg, #1c2128, #161b22);
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .gpu-stat-value {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--gpu-color);
+        }
+
+        .gpu-stat-label {
+            font-size: 0.8rem;
+            color: #7d8590;
+            margin-top: 5px;
+        }
+
         /* プログレスバーのダークテーマ調整 */
         .progress {
             background-color: #21262d;
@@ -131,6 +209,10 @@
 
         .bg-info {
             background-color: var(--info-color) !important;
+        }
+
+        .bg-gpu {
+            background: linear-gradient(90deg, var(--gpu-gradient-start), var(--gpu-gradient-end)) !important;
         }
 
         /* テーブルのダークテーマ */
@@ -186,12 +268,20 @@
             border: 1px solid var(--card-border);
         }
 
+        /* GPUなしメッセージ */
+        .no-gpu-message {
+            text-align: center;
+            padding: 20px;
+            color: #7d8590;
+            font-style: italic;
+        }
+
         /* レスポンシブ対応 */
         @media (min-width: 1920px) {
             .ultra-wide-grid {
                 grid-template-columns: repeat(6, 1fr);
             }
-            
+
             .temperature-grid {
                 grid-template-columns: repeat(8, 1fr);
             }
@@ -201,7 +291,7 @@
             .ultra-wide-grid {
                 grid-template-columns: repeat(8, 1fr);
             }
-            
+
             .temperature-grid {
                 grid-template-columns: repeat(10, 1fr);
             }
@@ -610,7 +700,8 @@
                 tempInfoHtml = `<p class="text-warning">注意: ${data.error}</p>`;
             } else {
                 tempInfoHtml += '<div class="temperature-grid">';
-                
+
+                // CPU温度
                 if (data.cpu) {
                     for (const [key, value] of Object.entries(data.cpu)) {
                         tempInfoHtml += `
@@ -625,6 +716,22 @@
                     }
                 }
 
+                // GPU温度（特別なスタイルで表示）
+                if (data.gpu) {
+                    for (const [key, value] of Object.entries(data.gpu)) {
+                        tempInfoHtml += `
+                            <div class="temp-item gpu-temp">
+                                <div class="temp-label"><i class="fas fa-tv"></i> ${key}</div>
+                                <div class="temp-value ${getGPUTemperatureClass(value)}">${value}°C</div>
+                                <div class="temp-bar">
+                                    <div class="temp-fill" style="width: ${Math.min(value * 100 / 100, 100)}%;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+
+                // NVMe温度
                 if (data.nvme) {
                     for (const [key, value] of Object.entries(data.nvme)) {
                         tempInfoHtml += `
@@ -638,7 +745,7 @@
                         `;
                     }
                 }
-                
+
                 tempInfoHtml += '</div>';
             }
 
@@ -658,6 +765,17 @@
             }
         }
 
+        // GPU温度用の特別な色分け
+        function getGPUTemperatureClass(value) {
+            if (value >= 85) {
+                return 'text-danger fw-bold';
+            } else if (value >= 75) {
+                return 'text-warning fw-bold';
+            } else {
+                return 'fw-bold';
+            }
+        }
+
         // 温度に応じてプログレスバーの色を変更
         function getTemperatureBarClass(value) {
             if (value >= 80) {
@@ -671,16 +789,57 @@
             }
         }
 
-        // GPU情報を更新
+        // GPU情報を更新（詳細版）
         function updateGpuInfo(data) {
             let gpuInfoHtml = '';
 
             if (data.error) {
                 gpuInfoHtml = `<p class="text-danger">エラー: ${data.error}</p>`;
+            } else if (!data.available) {
+                gpuInfoHtml = `<div class="no-gpu-message"><i class="fas fa-info-circle"></i> ${data.message || 'GPUが検出されませんでした'}</div>`;
+            } else if (data.gpus && data.gpus.length > 0) {
+                // NVIDIA GPUの詳細情報を表示
+                data.gpus.forEach(function(gpu) {
+                    gpuInfoHtml += `
+                        <div class="mb-3">
+                            <h6><strong>${gpu.name}</strong></h6>
+                            <p class="mb-2"><strong>ドライバ:</strong> ${data.driver}</p>
+                            
+                            <div class="gpu-stats">
+                                <div class="gpu-stat-item">
+                                    <div class="gpu-stat-value">${gpu.utilization}%</div>
+                                    <div class="gpu-stat-label">GPU使用率</div>
+                                </div>
+                                <div class="gpu-stat-item">
+                                    <div class="gpu-stat-value">${gpu.fan_speed}%</div>
+                                    <div class="gpu-stat-label">ファン速度</div>
+                                </div>
+                                <div class="gpu-stat-item">
+                                    <div class="gpu-stat-value">${Math.round(gpu.power_draw)}W</div>
+                                    <div class="gpu-stat-label">電力 (${Math.round(gpu.power_limit)}W)</div>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-3">
+                                <h6>メモリ使用率</h6>
+                                <div class="progress">
+                                    <div class="progress-bar bg-gpu" role="progressbar" 
+                                         style="width: ${gpu.memory_percent}%;" 
+                                         aria-valuenow="${gpu.memory_percent}" 
+                                         aria-valuemin="0" aria-valuemax="100">
+                                        ${Math.round(gpu.memory_used)}MB / ${Math.round(gpu.memory_total)}MB (${gpu.memory_percent}%)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
             } else {
+                // 基本的なGPU情報のみ表示
                 gpuInfoHtml = `
                     <p><strong>デバイス:</strong> ${data.device}</p>
                     <p><strong>ドライバ:</strong> ${data.driver}</p>
+                    <p class="text-muted"><small>nvidia-smiが利用できないため、詳細情報は表示できません</small></p>
                 `;
             }
 
