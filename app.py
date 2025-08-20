@@ -3,6 +3,8 @@ import time
 import json
 import psutil
 import subprocess
+import socket
+import re
 from flask import Flask, render_template, jsonify
 from datetime import datetime
 import platform
@@ -11,6 +13,42 @@ app = Flask(__name__)
 
 # テンプレートディレクトリを作成
 os.makedirs(os.path.join(os.path.dirname(__file__), 'templates'), exist_ok=True)
+
+# ローカルIPアドレスを取得する関数
+def get_local_ip():
+    try:
+        # 複数の方法でIPアドレスを取得
+        ip_addresses = []
+
+        # 方法1: ネットワークインターフェースから取得
+        net_addrs = psutil.net_if_addrs()
+        for interface, addrs in net_addrs.items():
+            # ループバックアドレス以外のインターフェースを確認
+            if interface != 'lo' and not interface.startswith('docker'):
+                for addr in addrs:
+                    # IPv4アドレスのみを対象
+                    if addr.family == socket.AF_INET:
+                        ip = addr.address
+                        # プライベートIPアドレスの範囲を確認
+                        if (ip.startswith('192.168.') or
+                            ip.startswith('10.') or
+                            ip.startswith('172.')):
+                            ip_addresses.append(ip)
+
+        # 方法2: socketを使用したフォールバック
+        if not ip_addresses:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                ip_addresses.append(s.getsockname()[0])
+                s.close()
+            except:
+                pass
+
+        return ip_addresses
+    except Exception as e:
+        print(f"IPアドレス取得エラー: {e}")
+        return []
 
 # CPU情報の取得
 def get_cpu_info():
@@ -72,80 +110,151 @@ def get_disk_info():
     except Exception as e:
         return {"error": str(e)}
 
+# nvidia-smiからGPU情報を取得
+def get_nvidia_gpu_info():
+    try:
+        # nvidia-smiコマンドを実行
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,power.limit,fan.speed', 
+             '--format=csv,noheader,nounits'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            gpu_info_list = []
+            lines = result.stdout.strip().split('\n')
+            
+            for idx, line in enumerate(lines):
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 8:
+                    gpu_info = {
+                        'index': idx,
+                        'name': parts[0],
+                        'temperature': float(parts[1]) if parts[1] and parts[1] != '[N/A]' else None,
+                        'utilization': float(parts[2]) if parts[2] and parts[2] != '[N/A]' else 0,
+                        'memory_used': float(parts[3]) if parts[3] and parts[3] != '[N/A]' else 0,
+                        'memory_total': float(parts[4]) if parts[4] and parts[4] != '[N/A]' else 0,
+                        'power_draw': float(parts[5]) if parts[5] and parts[5] != '[N/A]' else 0,
+                        'power_limit': float(parts[6]) if parts[6] and parts[6] != '[N/A]' else 0,
+                        'fan_speed': float(parts[7]) if parts[7] and parts[7] != '[N/A]' else 0,
+                        'type': 'nvidia'
+                    }
+                    
+                    # メモリ使用率を計算
+                    if gpu_info['memory_total'] > 0:
+                        gpu_info['memory_percent'] = round((gpu_info['memory_used'] / gpu_info['memory_total']) * 100, 1)
+                    else:
+                        gpu_info['memory_percent'] = 0
+                    
+                    # 電力使用率を計算
+                    if gpu_info['power_limit'] > 0:
+                        gpu_info['power_percent'] = round((gpu_info['power_draw'] / gpu_info['power_limit']) * 100, 1)
+                    else:
+                        gpu_info['power_percent'] = 0
+                    
+                    gpu_info_list.append(gpu_info)
+            
+            return gpu_info_list if gpu_info_list else None
+        
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+        return None
+
 # 温度情報の取得
 def get_temperature_info():
     try:
-        # sensorsコマンドの出力を取得（エラー出力を破棄）
+        temp_info = {}
+        
+        # CPU温度情報（既存のコード）
         try:
             output = subprocess.check_output(['sensors', '-j'], stderr=subprocess.DEVNULL, universal_newlines=True)
             sensors_data = json.loads(output)
-        except (subprocess.CalledProcessError, json.JSONDecodeError):
-            return {"error": "温度情報を取得できませんでした"}
-
-        # 温度データを整形
-        temp_info = {}
-
-        # CPUの温度情報
-        if 'k10temp-pci-00c3' in sensors_data:
-            temp_info['cpu'] = {}
-            cpu_data = sensors_data['k10temp-pci-00c3']
-            for key, value in cpu_data.items():
-                if key not in ['Adapter']:
-                    # 値が辞書で、その中に温度値があるか確認
-                    if isinstance(value, dict) and any(k.endswith('_input') for k in value.keys()):
-                        # 最初の *_input 値を取得
-                        for k, v in value.items():
-                            if k.endswith('_input') and isinstance(v, (int, float)):
-                                temp_info['cpu'][key] = v
-                                break
-
-        # NVMeの温度情報
-        nvme_keys = [key for key in sensors_data.keys() if key.startswith('nvme')]
-        if nvme_keys:
-            temp_info['nvme'] = {}
-            for nvme_key in nvme_keys:
-                nvme_data = sensors_data[nvme_key]
-                for key, value in nvme_data.items():
+            
+            # CPUの温度情報
+            if 'k10temp-pci-00c3' in sensors_data:
+                temp_info['cpu'] = {}
+                cpu_data = sensors_data['k10temp-pci-00c3']
+                for key, value in cpu_data.items():
                     if key not in ['Adapter']:
-                        # 値が辞書で、その中に温度値があるか確認
                         if isinstance(value, dict) and any(k.endswith('_input') for k in value.keys()):
-                            # 最初の *_input 値を取得
                             for k, v in value.items():
                                 if k.endswith('_input') and isinstance(v, (int, float)):
-                                    temp_info['nvme'][f"{key}"] = v
+                                    temp_info['cpu'][key] = v
                                     break
 
+            # NVMeの温度情報
+            nvme_keys = [key for key in sensors_data.keys() if key.startswith('nvme')]
+            if nvme_keys:
+                temp_info['nvme'] = {}
+                for nvme_key in nvme_keys:
+                    nvme_data = sensors_data[nvme_key]
+                    for key, value in nvme_data.items():
+                        if key not in ['Adapter']:
+                            if isinstance(value, dict) and any(k.endswith('_input') for k in value.keys()):
+                                for k, v in value.items():
+                                    if k.endswith('_input') and isinstance(v, (int, float)):
+                                        temp_info['nvme'][f"{key}"] = v
+                                        break
+        except:
+            pass
+        
+        # GPU温度情報を追加
+        gpu_info_list = get_nvidia_gpu_info()
+        if gpu_info_list:
+            temp_info['gpu'] = {}
+            for gpu in gpu_info_list:
+                if gpu['temperature'] is not None:
+                    gpu_label = f"GPU{gpu['index']}"
+                    if len(gpu_info_list) == 1:
+                        gpu_label = "GPU"
+                    temp_info['gpu'][gpu_label] = gpu['temperature']
+        
         return temp_info
     except Exception as e:
         return {"error": str(e)}
 
-# GPUの情報取得
+# GPUの情報取得（拡張版）
 def get_gpu_info():
     try:
-        # nvidiaの場合はnvidia-smi、AMDの場合はradeontopなどを使用
-        # ここではlspciの出力を解析してGPU情報を表示
-        output = subprocess.check_output('lspci | grep -i vga', shell=True, universal_newlines=True)
-
-        gpu_info = {
-            'device': output.strip(),
-            'driver': 'Unknown'
-        }
-
-        # 可能であればドライバ情報も追加（glxinfoエラーを無視）
-        try:
-            driver_output = subprocess.check_output('lsmod | grep -E "nvidia|nouveau|amdgpu|radeon"', shell=True, stderr=subprocess.DEVNULL, universal_newlines=True)
-
-            if 'nvidia' in driver_output:
-                gpu_info['driver'] = 'NVIDIA proprietary driver'
-            elif 'nouveau' in driver_output:
-                gpu_info['driver'] = 'Nouveau open source driver (NVIDIA)'
-            elif 'amdgpu' in driver_output:
-                gpu_info['driver'] = 'AMDGPU open source driver (AMD)'
-            elif 'radeon' in driver_output:
-                gpu_info['driver'] = 'Radeon open source driver (AMD)'
-        except:
-            # ドライバ情報の取得に失敗した場合は無視
-            pass
+        gpu_info = {}
+        
+        # nvidia-smiから詳細情報を取得
+        nvidia_gpus = get_nvidia_gpu_info()
+        
+        if nvidia_gpus:
+            gpu_info['gpus'] = nvidia_gpus
+            gpu_info['driver'] = 'NVIDIA proprietary driver'
+            gpu_info['available'] = True
+        else:
+            # nvidia-smiが使えない場合、lspciから基本情報を取得
+            try:
+                output = subprocess.check_output('lspci | grep -i vga', shell=True, universal_newlines=True)
+                gpu_info['device'] = output.strip()
+                gpu_info['driver'] = 'Unknown'
+                gpu_info['available'] = True
+                
+                # ドライバ情報を取得
+                try:
+                    driver_output = subprocess.check_output('lsmod | grep -E "nvidia|nouveau|amdgpu|radeon"', 
+                                                           shell=True, stderr=subprocess.DEVNULL, universal_newlines=True)
+                    
+                    if 'nvidia' in driver_output:
+                        gpu_info['driver'] = 'NVIDIA proprietary driver'
+                    elif 'nouveau' in driver_output:
+                        gpu_info['driver'] = 'Nouveau open source driver (NVIDIA)'
+                    elif 'amdgpu' in driver_output:
+                        gpu_info['driver'] = 'AMDGPU open source driver (AMD)'
+                    elif 'radeon' in driver_output:
+                        gpu_info['driver'] = 'Radeon open source driver (AMD)'
+                except:
+                    pass
+                
+                gpu_info['gpus'] = None
+            except:
+                gpu_info['available'] = False
+                gpu_info['message'] = 'GPUが検出されませんでした'
 
         return gpu_info
     except Exception as e:
@@ -214,7 +323,7 @@ def get_process_info():
                 processes.append(pinfo)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-        
+
         # CPU使用率でソート
         processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
         return processes[:20]  # 上位20プロセスだけ返す
@@ -289,9 +398,22 @@ def api_processes():
 if __name__ == '__main__':
     # テンプレートディレクトリを作成
     os.makedirs(os.path.join(os.path.dirname(__file__), 'templates'), exist_ok=True)
-    
+
     print('サーバー監視アプリを起動します...')
-    print('ブラウザで http://localhost:5000 にアクセスしてください')
-    
+
+    # ローカルIPアドレスを取得
+    local_ips = get_local_ip()
+
+    print('以下のURLでアクセス可能です:')
+    print('  http://localhost:5000')
+    print('  http://127.0.0.1:5000')
+
+    # 取得したIPアドレスを表示
+    for ip in local_ips:
+        print(f'  http://{ip}:5000')
+
+    if not local_ips:
+        print('警告: ローカルIPアドレスが取得できませんでした')
+
     # 0.0.0.0でリッスンすることで外部からアクセス可能にする
     app.run(host='0.0.0.0', port=5000, debug=True)
