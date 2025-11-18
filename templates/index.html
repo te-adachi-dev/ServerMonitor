@@ -315,6 +315,98 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #484f58;
         }
+
+        /* アラート用スタイル */
+        .alert-banner {
+            margin-bottom: 15px;
+            padding: 12px 20px;
+            border-radius: 6px;
+            border-left: 4px solid;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert-danger {
+            background-color: #2d1519;
+            border-left-color: var(--warning-color);
+            color: #ffc9c9;
+        }
+
+        .alert-warning {
+            background-color: #2d2410;
+            border-left-color: #d29922;
+            color: #ffd89d;
+        }
+
+        /* ボタンスタイル */
+        .btn-danger {
+            background-color: var(--warning-color);
+            border-color: var(--warning-color);
+        }
+
+        .btn-danger:hover {
+            background-color: #b83e35;
+            border-color: #b83e35;
+        }
+
+        .btn-sm {
+            padding: 4px 10px;
+            font-size: 12px;
+        }
+
+        /* 消費電力用スタイル */
+        .power-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .power-item {
+            background: linear-gradient(145deg, #1c2128, #161b22);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .power-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #f0c808;
+            margin: 10px 0;
+        }
+
+        .power-label {
+            font-size: 0.9rem;
+            color: #7d8590;
+            margin-bottom: 8px;
+        }
+
+        .power-bar {
+            height: 8px;
+            background: #21262d;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .power-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f0c808, #ff8c00);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -392,6 +484,11 @@
             </div>
         </div>
 
+        <!-- システムアラート -->
+        <div id="alerts-container">
+            <!-- ここにアラートが動的に追加されます -->
+        </div>
+
         <!-- 温度情報 - 横長専用デザイン -->
         <div class="card">
             <div class="card-header">
@@ -400,6 +497,18 @@
             <div class="card-body">
                 <div id="temperature-info">
                     <!-- ここに温度情報が動的に追加されます -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 消費電力情報 - 温度表示の近くに配置 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-bolt"></i> 消費電力情報
+            </div>
+            <div class="card-body">
+                <div id="power-info">
+                    <!-- ここに消費電力情報が動的に追加されます -->
                 </div>
             </div>
         </div>
@@ -449,6 +558,32 @@
                         </thead>
                         <tbody id="network-info">
                             <!-- ここにネットワーク情報が動的に追加されます -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ポート情報 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-door-open"></i> 使用中のポート情報
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped">
+                        <thead>
+                            <tr>
+                                <th>ポート</th>
+                                <th>プロセス名</th>
+                                <th>PID</th>
+                                <th>ユーザー</th>
+                                <th>アドレス</th>
+                                <th>アクション</th>
+                            </tr>
+                        </thead>
+                        <tbody id="port-info">
+                            <!-- ここにポート情報が動的に追加されます -->
                         </tbody>
                     </table>
                 </div>
@@ -561,6 +696,15 @@
 
                     // ネットワーク情報を更新
                     updateNetworkInfo(data.network);
+
+                    // 消費電力情報を更新
+                    updatePowerInfo(data.power);
+
+                    // ポート情報を更新
+                    updatePortInfo(data.ports);
+
+                    // アラート情報を更新
+                    updateAlerts(data.alerts);
                 },
                 error: function(xhr, status, error) {
                     console.error('データ取得エラー:', error);
@@ -877,6 +1021,153 @@
             }
 
             $('#network-info').html(networkInfoHtml);
+        }
+
+        // 消費電力情報を更新
+        function updatePowerInfo(data) {
+            let powerInfoHtml = '';
+
+            if (data.error) {
+                powerInfoHtml = `<p class="text-danger">エラー: ${data.error}</p>`;
+            } else {
+                powerInfoHtml += '<div class="power-grid">';
+
+                // 合計電力
+                if (data.total_power !== null) {
+                    powerInfoHtml += `
+                        <div class="power-item">
+                            <div class="power-label">合計消費電力</div>
+                            <div class="power-value">${Math.round(data.total_power)}W</div>
+                            <div class="power-bar">
+                                <div class="power-fill" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // GPU電力
+                if (data.gpu_power && data.gpu_power.length > 0) {
+                    data.gpu_power.forEach(function(gpu, index) {
+                        const powerPercent = gpu.limit > 0 ? (gpu.current / gpu.limit * 100) : 100;
+                        powerInfoHtml += `
+                            <div class="power-item">
+                                <div class="power-label"><i class="fas fa-tv"></i> ${gpu.name}</div>
+                                <div class="power-value">${Math.round(gpu.current)}W / ${Math.round(gpu.limit)}W</div>
+                                <div class="power-bar">
+                                    <div class="power-fill" style="width: ${powerPercent}%;"></div>
+                                </div>
+                                <small class="text-muted">${Math.round(gpu.percent)}%</small>
+                            </div>
+                        `;
+                    });
+                }
+
+                powerInfoHtml += '</div>';
+
+                if (!data.total_power && (!data.gpu_power || data.gpu_power.length === 0)) {
+                    powerInfoHtml = '<p class="text-muted">消費電力情報は利用できません</p>';
+                }
+            }
+
+            $('#power-info').html(powerInfoHtml);
+        }
+
+        // ポート情報を更新
+        function updatePortInfo(data) {
+            let portInfoHtml = '';
+
+            if (data.error) {
+                portInfoHtml = `<tr><td colspan="6" class="text-danger">エラー: ${data.error}</td></tr>`;
+            } else if (data.length === 0) {
+                portInfoHtml = '<tr><td colspan="6" class="text-muted">使用中のポートがありません</td></tr>';
+            } else {
+                data.forEach(function(port) {
+                    const killButton = port.pid ?
+                        `<button class="btn btn-danger btn-sm" onclick="killPort(${port.port})">
+                            <i class="fas fa-times"></i> Kill
+                        </button>` :
+                        '<span class="text-muted">N/A</span>';
+
+                    portInfoHtml += `
+                        <tr>
+                            <td><strong>${port.port}</strong></td>
+                            <td>${port.process}</td>
+                            <td>${port.pid || 'N/A'}</td>
+                            <td>${port.user}</td>
+                            <td>${port.address}</td>
+                            <td>${killButton}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            $('#port-info').html(portInfoHtml);
+        }
+
+        // アラート情報を更新
+        function updateAlerts(alerts) {
+            let alertsHtml = '';
+
+            if (alerts && alerts.length > 0) {
+                alerts.forEach(function(alert) {
+                    const alertClass = alert.level === 'danger' ? 'alert-danger' : 'alert-warning';
+                    const icon = alert.level === 'danger' ? 'fa-exclamation-triangle' : 'fa-exclamation-circle';
+
+                    alertsHtml += `
+                        <div class="alert-banner ${alertClass}">
+                            <i class="fas ${icon}"></i> <strong>${alert.type}:</strong> ${alert.message}
+                        </div>
+                    `;
+                });
+            }
+
+            $('#alerts-container').html(alertsHtml);
+        }
+
+        // ポートをキル
+        function killPort(port) {
+            if (!confirm(`ポート ${port} を使用しているプロセスを終了しますか？`)) {
+                return;
+            }
+
+            $.ajax({
+                url: `/api/kill_port/${port}`,
+                type: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert(response.message);
+                        fetchAllData();  // データを再取得
+                    } else {
+                        alert('エラー: ' + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    alert('エラーが発生しました: ' + error);
+                }
+            });
+        }
+
+        // プロセスをキル
+        function killProcess(pid) {
+            if (!confirm(`PID ${pid} のプロセスを終了しますか？`)) {
+                return;
+            }
+
+            $.ajax({
+                url: `/api/kill_process/${pid}`,
+                type: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert(response.message);
+                        fetchAllData();  // データを再取得
+                    } else {
+                        alert('エラー: ' + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    alert('エラーが発生しました: ' + error);
+                }
+            });
         }
     </script>
 </body>
