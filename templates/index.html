@@ -1045,7 +1045,7 @@
                     `;
                 }
 
-                // GPU電力
+                // NVIDIA GPU電力
                 if (data.gpu_power && data.gpu_power.length > 0) {
                     data.gpu_power.forEach(function(gpu, index) {
                         const powerPercent = gpu.limit > 0 ? (gpu.current / gpu.limit * 100) : 100;
@@ -1062,10 +1062,23 @@
                     });
                 }
 
+                // AMD GPU電力
+                if (data.amd_gpu) {
+                    powerInfoHtml += `
+                        <div class="power-item">
+                            <div class="power-label"><i class="fas fa-tv"></i> ${data.amd_gpu.name}</div>
+                            <div class="power-value">${data.amd_gpu.current}W</div>
+                            <div class="power-bar">
+                                <div class="power-fill" style="width: 50%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 powerInfoHtml += '</div>';
 
-                if (!data.total_power && (!data.gpu_power || data.gpu_power.length === 0)) {
-                    powerInfoHtml = '<p class="text-muted">消費電力情報は利用できません</p>';
+                if (!data.total_power && (!data.gpu_power || data.gpu_power.length === 0) && !data.amd_gpu) {
+                    powerInfoHtml = '<p class="text-muted">消費電力情報は利用できません（GPUが検出されないか、電力監視未対応です）</p>';
                 }
             }
 

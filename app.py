@@ -336,10 +336,11 @@ def get_power_info():
         power_info = {
             'total_power': None,
             'gpu_power': [],
-            'cpu_power': None
+            'cpu_power': None,
+            'amd_gpu': None
         }
 
-        # GPU電力情報を取得
+        # NVIDIA GPU電力情報を取得
         gpu_info_list = get_nvidia_gpu_info()
         if gpu_info_list:
             for gpu in gpu_info_list:
@@ -349,6 +350,25 @@ def get_power_info():
                     'limit': gpu['power_limit'],
                     'percent': gpu['power_percent']
                 })
+
+        # AMD GPU電力情報を取得（amdgpu_pm_info経由）
+        try:
+            amd_power_path = '/sys/class/drm/card0/device/hwmon'
+            if os.path.exists(amd_power_path):
+                for hwmon_dir in os.listdir(amd_power_path):
+                    power_file = os.path.join(amd_power_path, hwmon_dir, 'power1_average')
+                    if os.path.exists(power_file):
+                        with open(power_file, 'r') as f:
+                            power_uw = int(f.read().strip())
+                            power_w = power_uw / 1000000  # マイクロワットからワットへ
+                            power_info['amd_gpu'] = {
+                                'name': 'AMD GPU',
+                                'current': round(power_w, 2),
+                                'unit': 'W'
+                            }
+                        break
+        except:
+            pass
 
         # システム全体の電力を試行的に取得（RAPL経由など）
         try:
@@ -361,16 +381,20 @@ def get_power_info():
                     if os.path.exists(energy_file):
                         with open(energy_file, 'r') as f:
                             energy_uj = int(f.read().strip())
-                            # マイクロジュールからワットへの変換（簡易的な推定）
                             total_energy += energy_uj
-                # これは瞬間値ではなく累積値なので、実際の実装では時間差分が必要
                 power_info['cpu_power'] = 'RAPL available'
         except:
             pass
 
-        # 合計電力を計算（GPU電力の合計）
+        # 合計電力を計算
+        total = 0
         if power_info['gpu_power']:
-            power_info['total_power'] = sum([g['current'] for g in power_info['gpu_power']])
+            total += sum([g['current'] for g in power_info['gpu_power']])
+        if power_info['amd_gpu']:
+            total += power_info['amd_gpu']['current']
+
+        if total > 0:
+            power_info['total_power'] = round(total, 2)
 
         return power_info
     except Exception as e:
@@ -463,6 +487,12 @@ def get_system_alerts():
         for partition in psutil.disk_partitions():
             try:
                 if os.name == 'nt' and ('cdrom' in partition.opts or partition.fstype == ''):
+                    continue
+                # Snapパッケージは常に100%なので除外
+                if partition.mountpoint.startswith('/snap/'):
+                    continue
+                # squashfsは読み取り専用のループデバイスなので除外
+                if partition.fstype == 'squashfs':
                     continue
                 usage = psutil.disk_usage(partition.mountpoint)
                 if usage.percent > 90:
