@@ -330,6 +330,177 @@ def get_process_info():
     except Exception as e:
         return {"error": str(e)}
 
+# 消費電力情報の取得
+def get_power_info():
+    try:
+        power_info = {
+            'total_power': None,
+            'gpu_power': [],
+            'cpu_power': None
+        }
+
+        # GPU電力情報を取得
+        gpu_info_list = get_nvidia_gpu_info()
+        if gpu_info_list:
+            for gpu in gpu_info_list:
+                power_info['gpu_power'].append({
+                    'name': gpu['name'],
+                    'current': gpu['power_draw'],
+                    'limit': gpu['power_limit'],
+                    'percent': gpu['power_percent']
+                })
+
+        # システム全体の電力を試行的に取得（RAPL経由など）
+        try:
+            # Linux RAPL (Running Average Power Limit) から電力情報を取得
+            rapl_path = '/sys/class/powercap/intel-rapl'
+            if os.path.exists(rapl_path):
+                total_energy = 0
+                for rapl_dir in os.listdir(rapl_path):
+                    energy_file = os.path.join(rapl_path, rapl_dir, 'energy_uj')
+                    if os.path.exists(energy_file):
+                        with open(energy_file, 'r') as f:
+                            energy_uj = int(f.read().strip())
+                            # マイクロジュールからワットへの変換（簡易的な推定）
+                            total_energy += energy_uj
+                # これは瞬間値ではなく累積値なので、実際の実装では時間差分が必要
+                power_info['cpu_power'] = 'RAPL available'
+        except:
+            pass
+
+        # 合計電力を計算（GPU電力の合計）
+        if power_info['gpu_power']:
+            power_info['total_power'] = sum([g['current'] for g in power_info['gpu_power']])
+
+        return power_info
+    except Exception as e:
+        return {"error": str(e)}
+
+# 使用中のポート情報を取得
+def get_port_info():
+    try:
+        port_info = []
+        connections = psutil.net_connections(kind='inet')
+
+        # ポートごとにプロセス情報を集約
+        port_map = {}
+        for conn in connections:
+            if conn.status == 'LISTEN' and conn.laddr:
+                port = conn.laddr.port
+                if port not in port_map:
+                    try:
+                        if conn.pid:
+                            proc = psutil.Process(conn.pid)
+                            port_map[port] = {
+                                'port': port,
+                                'pid': conn.pid,
+                                'process': proc.name(),
+                                'user': proc.username(),
+                                'status': conn.status,
+                                'address': conn.laddr.ip if conn.laddr else 'N/A'
+                            }
+                        else:
+                            port_map[port] = {
+                                'port': port,
+                                'pid': None,
+                                'process': 'N/A',
+                                'user': 'N/A',
+                                'status': conn.status,
+                                'address': conn.laddr.ip if conn.laddr else 'N/A'
+                            }
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        port_map[port] = {
+                            'port': port,
+                            'pid': conn.pid,
+                            'process': 'Access Denied',
+                            'user': 'N/A',
+                            'status': conn.status,
+                            'address': conn.laddr.ip if conn.laddr else 'N/A'
+                        }
+
+        # リストに変換してポート番号でソート
+        port_info = sorted(port_map.values(), key=lambda x: x['port'])
+        return port_info
+    except Exception as e:
+        return {"error": str(e)}
+
+# システムアラート情報を取得
+def get_system_alerts():
+    try:
+        alerts = []
+
+        # CPU使用率チェック
+        cpu_percent = psutil.cpu_percent(interval=0.5)
+        if cpu_percent > 90:
+            alerts.append({
+                'level': 'danger',
+                'type': 'CPU',
+                'message': f'CPU使用率が危険レベルです: {cpu_percent}%'
+            })
+        elif cpu_percent > 80:
+            alerts.append({
+                'level': 'warning',
+                'type': 'CPU',
+                'message': f'CPU使用率が高いです: {cpu_percent}%'
+            })
+
+        # メモリ使用率チェック
+        memory = psutil.virtual_memory()
+        if memory.percent > 90:
+            alerts.append({
+                'level': 'danger',
+                'type': 'Memory',
+                'message': f'メモリ使用率が危険レベルです: {memory.percent}%'
+            })
+        elif memory.percent > 80:
+            alerts.append({
+                'level': 'warning',
+                'type': 'Memory',
+                'message': f'メモリ使用率が高いです: {memory.percent}%'
+            })
+
+        # ディスク使用率チェック
+        for partition in psutil.disk_partitions():
+            try:
+                if os.name == 'nt' and ('cdrom' in partition.opts or partition.fstype == ''):
+                    continue
+                usage = psutil.disk_usage(partition.mountpoint)
+                if usage.percent > 90:
+                    alerts.append({
+                        'level': 'danger',
+                        'type': 'Disk',
+                        'message': f'{partition.mountpoint} のディスク使用率が危険レベルです: {usage.percent}%'
+                    })
+                elif usage.percent > 80:
+                    alerts.append({
+                        'level': 'warning',
+                        'type': 'Disk',
+                        'message': f'{partition.mountpoint} のディスク使用率が高いです: {usage.percent}%'
+                    })
+            except:
+                pass
+
+        # 温度チェック
+        temp_info = get_temperature_info()
+        if 'cpu' in temp_info:
+            for key, value in temp_info['cpu'].items():
+                if value > 85:
+                    alerts.append({
+                        'level': 'danger',
+                        'type': 'Temperature',
+                        'message': f'CPU温度が危険レベルです: {value}°C'
+                    })
+                elif value > 75:
+                    alerts.append({
+                        'level': 'warning',
+                        'type': 'Temperature',
+                        'message': f'CPU温度が高いです: {value}°C'
+                    })
+
+        return alerts
+    except Exception as e:
+        return {"error": str(e)}
+
 # すべての情報を取得
 def get_all_info():
     return {
@@ -341,7 +512,10 @@ def get_all_info():
         'temperature': get_temperature_info(),
         'gpu': get_gpu_info(),
         'network': get_network_info(),
-        'processes': get_process_info()
+        'processes': get_process_info(),
+        'power': get_power_info(),
+        'ports': get_port_info(),
+        'alerts': get_system_alerts()
     }
 
 # ルートページ
@@ -393,6 +567,94 @@ def api_system():
 @app.route('/api/processes')
 def api_processes():
     return jsonify(get_process_info())
+
+# APIルート - 消費電力情報を取得
+@app.route('/api/power')
+def api_power():
+    return jsonify(get_power_info())
+
+# APIルート - ポート情報を取得
+@app.route('/api/ports')
+def api_ports():
+    return jsonify(get_port_info())
+
+# APIルート - システムアラート情報を取得
+@app.route('/api/alerts')
+def api_alerts():
+    return jsonify(get_system_alerts())
+
+# APIルート - プロセスをキル
+@app.route('/api/kill_process/<int:pid>', methods=['POST'])
+def api_kill_process(pid):
+    try:
+        proc = psutil.Process(pid)
+        proc_name = proc.name()
+        proc.terminate()  # まず丁寧に終了を試みる
+
+        # 3秒待機して、まだ生きていたら強制終了
+        try:
+            proc.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            proc.kill()
+
+        return jsonify({
+            'success': True,
+            'message': f'プロセス {proc_name} (PID: {pid}) を終了しました'
+        })
+    except psutil.NoSuchProcess:
+        return jsonify({
+            'success': False,
+            'message': f'PID {pid} のプロセスが見つかりません'
+        }), 404
+    except psutil.AccessDenied:
+        return jsonify({
+            'success': False,
+            'message': f'PID {pid} のプロセスを終了する権限がありません'
+        }), 403
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'エラーが発生しました: {str(e)}'
+        }), 500
+
+# APIルート - ポートを使用しているプロセスをキル
+@app.route('/api/kill_port/<int:port>', methods=['POST'])
+def api_kill_port(port):
+    try:
+        connections = psutil.net_connections(kind='inet')
+        killed_processes = []
+
+        for conn in connections:
+            if conn.laddr and conn.laddr.port == port and conn.pid:
+                try:
+                    proc = psutil.Process(conn.pid)
+                    proc_name = proc.name()
+                    proc.terminate()
+
+                    try:
+                        proc.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+
+                    killed_processes.append(f'{proc_name} (PID: {conn.pid})')
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        if killed_processes:
+            return jsonify({
+                'success': True,
+                'message': f'ポート {port} を使用していたプロセスを終了しました: {", ".join(killed_processes)}'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'ポート {port} を使用しているプロセスが見つかりませんでした'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'エラーが発生しました: {str(e)}'
+        }), 500
 
 # メインエントリポイント
 if __name__ == '__main__':
