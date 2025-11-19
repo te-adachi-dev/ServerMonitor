@@ -404,6 +404,53 @@ def get_power_info():
 def get_port_info():
     try:
         port_info = []
+
+        # macOSの場合はlsofを使用
+        if platform.system() == 'Darwin':
+            try:
+                # lsofでLISTEN状態のポートを取得
+                result = subprocess.run(
+                    ['lsof', '-i', '-P', '-n', '-sTCP:LISTEN'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if result.returncode == 0:
+                    port_map = {}
+                    lines = result.stdout.strip().split('\n')[1:]  # ヘッダーをスキップ
+
+                    for line in lines:
+                        parts = line.split()
+                        if len(parts) >= 9:
+                            process_name = parts[0]
+                            pid = int(parts[1])
+                            user = parts[2]
+
+                            # アドレスとポートを解析
+                            addr_part = parts[8]
+                            if ':' in addr_part:
+                                addr, port_str = addr_part.rsplit(':', 1)
+                                try:
+                                    port = int(port_str)
+                                    if port not in port_map:
+                                        port_map[port] = {
+                                            'port': port,
+                                            'pid': pid,
+                                            'process': process_name,
+                                            'user': user,
+                                            'status': 'LISTEN',
+                                            'address': addr if addr != '*' else '0.0.0.0'
+                                        }
+                                except ValueError:
+                                    pass
+
+                    port_info = sorted(port_map.values(), key=lambda x: x['port'])
+                    return port_info
+            except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+                pass
+
+        # Linux/Windowsの場合はpsutilを使用
         connections = psutil.net_connections(kind='inet')
 
         # ポートごとにプロセス情報を集約
